@@ -64,7 +64,7 @@ export default function Datenschutz() {
                 Lugareen GmbH<br/>
                 Kaule 6a<br/>
                 51429 Bergisch Gladbach<br/><br/>
-                Telefon: +15122768037<br/>
+                <br/>
                 E-Mail: info@lugareen.de
               </div>
             </section>
