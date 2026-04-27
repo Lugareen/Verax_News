@@ -50,75 +50,111 @@ Gib NUR valides JSON zurück:
 
 async function agent2_extractFacts(topic, allArticles) {
   const today = new Date().toLocaleDateString("de-DE", { day:"2-digit", month:"2-digit", year:"numeric" });
-  const texts = allArticles.slice(0, 8).map(a =>
-    `[${a.source}/${a.priority}] ${a.title}\n${a.summary.slice(0, 300)}`
+
+  // Bevorzuge Artikel mit Volltext
+  const sorted = [...allArticles].sort((a, b) => (b.hasFullText ? 1 : 0) - (a.hasFullText ? 1 : 0));
+  const fulltextCount = allArticles.filter(a => a.hasFullText).length;
+  const texts = sorted.slice(0, 8).map(a =>
+    `[${a.source}${a.hasFullText ? "/VOLLTEXT" : "/TEASER"}]\nTitel: ${a.title}\nInhalt: ${a.summary.slice(0, 600)}`
   ).join("\n---\n");
+
   const res = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 800,
-    system: `Du bist ein objektiver Fakten-Extraktor. Nur belegte Fakten, keine Wertungen.
-VERBOTEN in der Summary: aggressiv, Missbrauch, drohend, Wirtschaftsnationalismus, gefährlich.
+    system: `Du bist ein streng objektiver Fakten-Extraktor. (Datum: ${today})
 
-KRITISCH — POLITISCHE AKTUALITÄT (Datum: ${today}):
-Verwende NUR politische Konstellationen, Regierungen und Amtsinhaber die in den
-bereitgestellten Artikeln EXPLIZIT genannt werden.
-NIEMALS auf Trainingswissen über aktuelle Regierungen oder Koalitionen zurückgreifen.
-Beispiel: Schreibe NICHT "Die Ampel-Regierung" wenn das nicht im Artikel steht.
-Wenn unklar welche Regierung gemeint ist: schreibe "die Bundesregierung" oder weglassen.
+ABSOLUTE GRUNDREGEL:
+Schreibe AUSSCHLIESSLICH was in den bereitgestellten Artikeln steht.
+Trainingswissen ist VERBOTEN — auch wenn du etwas zu wissen glaubst.
+Lieber eine kürzere aber akkurate Zusammenfassung als eine längere mit erfundenen Details.
+
+WENN ZU WENIG MATERIAL:
+Schreibe nur was du belegen kannst — auch wenn es nur 2 Sätze sind.
+Kennzeichne Unsicherheit: "laut [Quelle]..." statt absolute Aussagen.
+
+VERBOTEN:
+- Wertende Adjektive: aggressiv, Missbrauch, drohend, gefährlich
+- Koalitionsnamen die nicht in Artikeln stehen: Ampel-Regierung, Scholz-Regierung
+- Spekulationen über Absichten oder Folgen die nicht in Artikeln stehen
 
 Gib NUR valides JSON zurück:
-{"headline":"Max 10 Wörter neutral","summary":"3-5 neutrale Sätze","confidence":"high/medium/low"}`,
-    messages: [{ role: "user", content: `Thema: ${topic.topic}\n\nArtikel:\n${texts}` }]
+{"headline":"Max 10 Wörter neutral","summary":"Nur belegte Fakten 2-5 Sätze","confidence":"high/medium/low"}`,
+    messages: [{ role: "user", content: `Thema: ${topic.topic}\nVerfügbar: ${fulltextCount} Volltexte, ${allArticles.length - fulltextCount} Teaser\n\nArtikel:\n${texts}` }]
   });
   return extractJSON(res.content[0].text);
 }
 
 async function agent3_analyzePerspectives(topic, facts, allArticles) {
   const today = new Date().toLocaleDateString("de-DE", { day:"2-digit", month:"2-digit", year:"numeric" });
-  const leftArticles = allArticles.filter(a => a.lean === "left").slice(0, 4)
-    .map(a => `[${a.source}] ${a.title}\n${a.summary.slice(0, 300)}`).join("\n---\n");
-  const rightArticles = allArticles.filter(a => a.lean === "right").slice(0, 4)
-    .map(a => `[${a.source}] ${a.title}\n${a.summary.slice(0, 300)}`).join("\n---\n");
+
+  // Bevorzuge Volltexte, mehr Zeichen für bessere Analyse
+  const leftArticles = allArticles.filter(a => a.lean === "left")
+    .sort((a, b) => (b.hasFullText ? 1 : 0) - (a.hasFullText ? 1 : 0))
+    .slice(0, 4)
+    .map(a => `[${a.source}${a.hasFullText ? "/VOLLTEXT" : "/TEASER"}]\n${a.title}\n${a.summary.slice(0, 800)}`)
+    .join("\n---\n");
+
+  const rightArticles = allArticles.filter(a => a.lean === "right")
+    .sort((a, b) => (b.hasFullText ? 1 : 0) - (a.hasFullText ? 1 : 0))
+    .slice(0, 4)
+    .map(a => `[${a.source}${a.hasFullText ? "/VOLLTEXT" : "/TEASER"}]\n${a.title}\n${a.summary.slice(0, 800)}`)
+    .join("\n---\n");
 
   const hasLeftArticles = allArticles.filter(a => a.lean === "left").length > 0;
   const hasRightArticles = allArticles.filter(a => a.lean === "right").length > 0;
 
   const res = await client.messages.create({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 1500,
+    max_tokens: 2000,
     system: `Du bist ein Medien-Perspektiven-Analyst. (Datum: ${today})
-Je 3 Absätze pro Perspektive. SYMMETRIE: Beide Seiten kommentieren DASSELBE Ereignis.
-Struktur: Absatz1=Bewertung, Absatz2=Betonte Folgen, Absatz3=Geforderte Reaktion.
-Prognosen kennzeichnen mit "laut [Quelle] könnten...".
 
-KRITISCH — POLITISCHE AKTUALITÄT:
-Verwende NUR politische Konstellationen und Regierungen die in den Artikeln EXPLIZIT stehen.
-NIEMALS auf Trainingswissen über aktuelle Regierungen zurückgreifen.
-Schreibe NICHT "Ampel-Regierung" es sei denn es steht WÖRTLICH in einem Artikel.
-Bei Unsicherheit: "die Bundesregierung" oder "die Regierung" verwenden.
+DEINE KERNAUFGABE:
+Zeige wie links-liberale und konservative Medien WIRKLICH über dieses Thema schreiben —
+mit ihrem echten Ton, ihrer Sprache und ihrer Gewichtung.
+Das Ergebnis soll lebendig und interessant zu lesen sein, nicht trocken.
 
-KRITISCH — QUELLENREGELN:
-Links/Liberal Quellen:      Spiegel, taz, SZ, Guardian, Le Monde, NYT, Washington Post, NPR, Zeit, Stern, Tagesspiegel, FR, Berliner Zeitung
-Konservativ/Rechts Quellen: FAZ, Welt, NZZ, Telegraph, Focus, Cicero, The Pioneer, WSJ, Bild
+FAKTENTREUE — ABSOLUTE GRUNDREGEL:
+Basis sind AUSSCHLIESSLICH die bereitgestellten Artikel.
+Kein Trainingswissen über Fakten — aber du darfst den redaktionellen Stil
+und die typische Einordnung dieser Medien authentisch wiedergeben.
 
-NIEMALS eine Links-Quelle als konservative Quelle verwenden und umgekehrt.
-Der Guardian ist IMMER links/liberal — NIEMALS konservativ.
+WAS DU ZEIGEN SOLLST:
+- Welche Aspekte des Themas betont diese Mediengattung besonders?
+- Welche Wortwahl, welcher Ton ist typisch? (z.B. Links: soziale Folgen, Solidarität / Rechts: Eigenverantwortung, Stabilität)
+- Welche Schlussfolgerungen ziehen sie aus den Fakten?
+- Welche Forderungen stellen sie typischerweise?
 
-WENN KEINE ARTIKEL VERFÜGBAR:
-- Wenn keine linken Artikel: basis_tag = "knowledge", sources_used = []
-- Wenn keine konservativen Artikel: basis_tag = "knowledge", sources_used = []
-- In diesem Fall: Beschreibe die typische redaktionelle Linie dieser Medien
-  zum Thema — aber kennzeichne es klar als Einschätzung, nicht als Artikel-Inhalt
+STRUKTUR (je 2-3 Absätze pro Perspektive):
+- Absatz 1: Wie bewertet diese Seite das Ereignis? Welchen Rahmen setzt sie?
+- Absatz 2: Welche Folgen und Aspekte betont sie — und warum?
+- Absatz 3: Was fordert sie? Ihr Grundtenor.
 
-WICHTIG für sources_used:
-NUR echte Mediennamen aus den tatsächlich verwendeten Artikeln.
-Wenn kein Artikel vorhanden: leeres Array [].
+WENN WENIG ARTIKEL VERFÜGBAR:
+Nutze die vorhandenen Artikel als Ankerpunkte und ergänze mit dem
+typischen redaktionellen Stil dieser Medien — kennzeichne mit basis_tag "knowledge".
+Schreibe trotzdem lebendige, informative Absätze.
+
+POLITISCHE AKTUALITÄT:
+Nur Regierungsnamen die EXPLIZIT in Artikeln stehen.
+NIEMALS: "Ampel-Regierung" ohne Beleg.
+
+QUELLENREGELN — STRIKT:
+Links/Liberal:      Spiegel, taz, SZ, Guardian, Le Monde, NYT, Washington Post, NPR, Zeit, Stern, Tagesspiegel, FR, Berliner Zeitung, Der Standard, The Independent
+Konservativ/Rechts: FAZ, Welt, NZZ, Telegraph, Focus, Cicero, The Pioneer, WSJ, Bild, New York Post, The Times, The Spectator, Fox News
+NIEMALS Guardian oder andere Linksquellen als konservativ kennzeichnen.
 
 Gib NUR valides JSON zurück:
 {"left_perspective":{"paragraphs":["p1","p2","p3"],"sources_used":["Spiegel","taz"],"basis_tag":"article","key_argument":"1 Satz"},"right_perspective":{"paragraphs":["p1","p2","p3"],"sources_used":["FAZ","NZZ"],"basis_tag":"article","key_argument":"1 Satz"},"divergence_score":7,"divergence_note":"Kurz"}`,
     messages: [{
       role: "user",
-      content: `Thema: ${topic.topic}\nFakten: ${facts.summary}\n\nLINKS/LIBERAL (${hasLeftArticles ? "Artikel verfügbar" : "KEINE Artikel — verwende redaktionelle Linie"}):\n${leftArticles || "Keine Artikel verfügbar"}\n\nKONSERVATIV (${hasRightArticles ? "Artikel verfügbar" : "KEINE Artikel — verwende redaktionelle Linie"}):\n${rightArticles || "Keine Artikel verfügbar"}`
+      content: `Thema: ${topic.topic}
+Fakten: ${facts.summary}
+
+LINKS/LIBERAL (${hasLeftArticles ? `${allArticles.filter(a=>a.lean==="left" && a.hasFullText).length} Volltexte verfügbar` : "KEINE Artikel — nur redaktionelle Linie verwenden"}):
+${leftArticles || "Keine Artikel verfügbar"}
+
+KONSERVATIV (${hasRightArticles ? `${allArticles.filter(a=>a.lean==="right" && a.hasFullText).length} Volltexte verfügbar` : "KEINE Artikel — nur redaktionelle Linie verwenden"}):
+${rightArticles || "Keine Artikel verfügbar"}`
     }]
   });
   return extractJSON(res.content[0].text);
