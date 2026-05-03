@@ -1,0 +1,9 @@
+{
+  "framework": "nextjs",
+  "crons": [
+    { "path": "/api/cron?categoryId=politik-international", "schedule": "15 3 * * *" },
+    { "path": "/api/cron?categoryId=politik-deutschland",   "schedule": "25 3 * * *" },
+    { "path": "/api/cron?categoryId=boerse-international",  "schedule": "35 3 * * *" },
+    { "path": "/api/cron?categoryId=boerse-deutschland",    "schedule": "45 3 * * *" }
+  ]
+}
